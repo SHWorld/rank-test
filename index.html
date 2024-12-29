@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>経験値＆ランクテスト</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .section { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+    .equip-slot { margin: 5px 0; }
+    .equip-slot select { width: 150px; }
+    .status { margin: 5px 0; font-weight: bold; }
+    button { margin: 5px 0; }
+  </style>
+</head>
+<body>
+
+<h1>装備・経験値テスト</h1>
+
+<div class="section">
+  <h2>プレイヤーステータス</h2>
+  <div class="status">ランク: <span id="rank">1</span></div>
+  <div class="status">現在経験値: <span id="currentExp">0</span></div>
+  <div class="status">次ランクまで: <span id="toNextExp">???</span></div>
+</div>
+
+<div class="section">
+  <h2>装備</h2>
+  <!-- 装備スロット例 -->
+  <div class="equip-slot">
+    ベルト:
+    <select id="beltSelect"></select>
+  </div>
+  <div class="equip-slot">
+    靴:
+    <select id="shoesSelect"></select>
+  </div>
+  <!-- 装備を増やしたい場合はここにslotを足すか、JSで自動生成する -->
+
+  <button id="saveEquipBtn">装備を保存</button>
+</div>
+
+<div class="section">
+  <h2>経験値獲得テスト</h2>
+  <p>一日に稼ぐ経験値を入力して「経験値追加」ボタンを押すと反映します。</p>
+  <input type="number" id="dailyExp" placeholder="例: 30000" value="30000" />
+  <button id="addExpBtn">経験値追加</button>
+</div>
+
+<div class="section">
+  <h2>データリセット</h2>
+  <button id="resetBtn">データ初期化</button>
+</div>
+
+<script>
+// ========================
+// 1. データ定義部分
+// ========================
+
+// 装備リスト（必要に応じてアイテム追加可能）
+// expBonus は 「+0.20」で経験値 +20% のようにして使います
+const beltList = [
+  { id: 0, name: "なし", expBonus: 0 },
+  { id: 1, name: "シンプルベルト", expBonus: 0.10 },
+  { id: 2, name: "高級ベルト",    expBonus: 0.25 },
+];
+
+const shoesList = [
+  { id: 0, name: "なし", expBonus: 0 },
+  { id: 1, name: "軽量シューズ", expBonus: 0.05 },
+  { id: 2, name: "スピードブーツ", expBonus: 0.15 },
+];
+
+// プレイヤーデータ（ランク,経験値,現在装備など）
+let player = {
+  rank: 1,
+  currentExp: 0,
+  belt: 0,  // beltList[0] = なし
+  shoes: 0, // shoesList[0] = なし
+};
+
+// ランクごとの必要経験値を計算する関数
+// 今回は最大ランク50、低ランクは1万程度から徐々に必要EXPが増えるような形
+// 例: rank=1 -> 0 (初期状態), rank=2 -> 10000, rank=3 -> 20000, ...
+// さらにランクが上がるにつれ +α で増やします
+function requiredExpForRank(rank) {
+  if (rank <= 1) return 0;  // ランク1のときは必要なし
+  if (rank > 50) return Infinity; // 50が最大ランク
+  // 例えばランク2で10000, 3で20000, ... というベース計算
+  // + (rankが上がる毎に増やす量を少しずつ増やす)
+  const base = 10000 * (rank - 1); 
+  const extraFactor = (rank - 1) * 2000; // 徐々に増大
+  return base + extraFactor;
+}
+
+// ========================
+// 2. 初期化処理
+// ========================
+
+// HTMLの <select> に装備リストを反映
+function initEquipmentSelects() {
+  const beltSelect = document.getElementById("beltSelect");
+  beltList.forEach(item => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.name;
+    beltSelect.appendChild(option);
+  });
+
+  const shoesSelect = document.getElementById("shoesSelect");
+  shoesList.forEach(item => {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.name;
+    shoesSelect.appendChild(option);
+  });
+}
+
+// ローカルストレージからセーブデータを読み込み
+function loadData() {
+  const saved = localStorage.getItem("playerData");
+  if (saved) {
+    const obj = JSON.parse(saved);
+    // データがあれば player に復元
+    player = obj;
+  }
+}
+
+// 画面の表示を更新
+function updateUI() {
+  document.getElementById("rank").textContent = player.rank;
+  document.getElementById("currentExp").textContent = player.currentExp;
+
+  const nextReq = requiredExpForRank(player.rank + 1);
+  if (player.rank >= 50) {
+    document.getElementById("toNextExp").textContent = "最大ランク到達！";
+  } else {
+    const remain = nextReq - player.currentExp;
+    document.getElementById("toNextExp").textContent = remain;
+  }
+
+  // select の表示をプレイヤーデータに合わせる
+  document.getElementById("beltSelect").value = player.belt;
+  document.getElementById("shoesSelect").value = player.shoes;
+}
+
+// ========================
+// 3. ゲームロジック
+// ========================
+
+// 現在の装備による経験値ボーナス合計を計算
+function getEquipExpBonus() {
+  const belt = beltList.find(i => i.id == player.belt) || { expBonus: 0 };
+  const shoes = shoesList.find(i => i.id == player.shoes) || { expBonus: 0 };
+  const totalBonus = belt.expBonus + shoes.expBonus;
+  return totalBonus;
+}
+
+// 経験値を加算し、ランクアップ判定
+function addExp(baseExp) {
+  // 装備ボーナス
+  const bonus = getEquipExpBonus();
+  const finalExp = Math.floor(baseExp * (1 + bonus)); 
+  player.currentExp += finalExp;
+
+  // ランクアップ
+  while (player.rank < 50) {
+    const nextReq = requiredExpForRank(player.rank + 1);
+    if (player.currentExp >= nextReq) {
+      // ランクアップ
+      player.rank++;
+    } else {
+      break;
+    }
+  }
+
+  // 最大ランクで必要経験値を超えたら切り捨てる(お好みで)
+  if (player.rank >= 50) {
+    player.rank = 50;
+    const maxReq = requiredExpForRank(50);
+    if (player.currentExp > maxReq) {
+      player.currentExp = maxReq;
+    }
+  }
+
+  // 更新 & セーブ
+  updateUI();
+  saveData();
+}
+
+function saveData() {
+  localStorage.setItem("playerData", JSON.stringify(player));
+}
+
+// ========================
+// 4. イベントセットアップ
+// ========================
+
+window.addEventListener("load", () => {
+  // 装備セレクト初期化
+  initEquipmentSelects();
+
+  // データロード
+  loadData();
+  updateUI();
+
+  // 装備変更ボタン
+  document.getElementById("saveEquipBtn").addEventListener("click", () => {
+    player.belt = parseInt(document.getElementById("beltSelect").value, 10);
+    player.shoes = parseInt(document.getElementById("shoesSelect").value, 10);
+    updateUI();
+    saveData();
+    alert("装備を変更しました！");
+  });
+
+  // 経験値追加ボタン
+  document.getElementById("addExpBtn").addEventListener("click", () => {
+    const dailyExp = parseInt(document.getElementById("dailyExp").value, 10) || 0;
+    addExp(dailyExp);
+    alert(`経験値 ${dailyExp} を獲得！（装備ボーナス後は ${player.currentExp} 累計EXP）`);
+  });
+
+  // リセットボタン
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    if (confirm("本当にデータを初期化しますか？")) {
+      localStorage.removeItem("playerData");
+      player = {
+        rank: 1,
+        currentExp: 0,
+        belt: 0,
+        shoes: 0,
+      };
+      updateUI();
+      alert("初期化しました。");
+    }
+  });
+});
+</script>
+
+</body>
+</html>
